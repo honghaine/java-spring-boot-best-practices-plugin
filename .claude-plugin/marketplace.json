@@ -1,0 +1,12 @@
+{
+  "name": "java-spring-boot-best-practices",
+  "owner": { "name": "hector.haito" },
+  "plugins": [
+    {
+      "name": "java-spring-boot-best-practices",
+      "description": "Java 17+ and Spring Boot 3 coding standards and code-review severity map.",
+      "category": "development",
+      "source": "./"
+    }
+  ]
+}
