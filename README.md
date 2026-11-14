@@ -22,7 +22,7 @@ Code reviews use a **Blocker / Critical / Major / Minor** severity map. Each fin
 ## Install
 
 ```
-/plugin marketplace add <github-user>/java-spring-boot-best-practices-plugin
+/plugin marketplace add honghaine/java-spring-boot-best-practices-plugin
 /plugin install java-spring-boot-best-practices@java-spring-boot-best-practices
 ```
 
