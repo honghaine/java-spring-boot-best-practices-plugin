@@ -1,6 +1,6 @@
 ---
 name: java-spring-boot-best-practices
-description: Java + Spring Boot coding standards covering core Java pitfalls, collections/streams, money arithmetic, concurrency, transactions, JPA/database, REST API design, resilience, caching, observability, security, logging, and testing, with a severity map for code review. Use this skill whenever writing, reviewing, refactoring, or debugging Java or Spring Boot code (controllers, services, repositories, entities, @Transactional, JPA/Hibernate/MyBatis, REST endpoints, @Scheduled jobs, Kafka/RabbitMQ listeners, thread pools, CompletableFuture, BigDecimal/money logic, date/time handling, serialization, JUnit tests), even if the user does not say "best practices" or "code review". Also use it when someone asks whether Java code is correct, safe, performant, or production-ready.
+description: Java + Spring Boot coding standards covering core Java pitfalls, collections/streams, money arithmetic, concurrency, transactions, JPA/database, REST API design, resilience, caching, observability, security, logging, testing, and ArchUnit architecture rules, with a severity map for code review. Use this skill whenever writing, reviewing, refactoring, or debugging Java or Spring Boot code (controllers, services, repositories, entities, @Transactional, JPA/Hibernate/MyBatis, REST endpoints, @Scheduled jobs, Kafka/RabbitMQ listeners, thread pools, CompletableFuture, BigDecimal/money logic, date/time handling, serialization, JUnit or ArchUnit tests, layering between controllers/services/repositories), even if the user does not say "best practices" or "code review". Also use it when someone asks whether Java code is correct, safe, performant, or production-ready.
 ---
 
 # Java & Spring Boot Coding Best Practices
@@ -45,6 +45,7 @@ if (Objects.equals(s1, s2)) { ... }   // or "CONST".equals(s) when one side is a
 - `if (str != null && !str.isEmpty())`; `if (str == null || str.isEmpty())`. Prefer `StringUtils.hasText(str)` (Spring) or `StringUtils.isNotBlank(str)` (commons-lang3).
 - Return empty collections, never `null`, from methods returning collections.
 - Nested null checks → `Optional.ofNullable(e).map(Employee::getDepartment).map(Department::getId).orElse(DEFAULT_ID)`. Use `Optional` as a return type, not as a field or parameter. Never call `optional.get()` without checking — use `orElse`/`orElseThrow`.
+- A method returning `Optional` returns `Optional.empty()`, never `null`, and is never annotated `@Nullable`.
 
 ### 1.4 Collections — Mandatory
 - Never add/remove elements while iterating with for-each → `ConcurrentModificationException`. Use `removeIf(...)` or an explicit `Iterator.remove()`.
@@ -52,6 +53,7 @@ if (Objects.equals(s1, s2)) { ... }   // or "CONST".equals(s) when one side is a
 - `toArray(new T[0])` (or `toArray(T[]::new)`); never cast the no-arg `toArray()` result.
 - Override `hashCode()` whenever you override `equals()`; never use mutable fields in either for objects stored in `HashMap`/`HashSet`.
 - Don't return internal mutable collections from getters; return `List.copyOf(...)` or an unmodifiable view.
+- Recommended: use `ArrayList`, `HashMap`, `StringBuilder`, `ArrayDeque` instead of the legacy `Vector`, `Hashtable`, `StringBuffer`, `Stack`. Their per-call locking is slower and still doesn't make check-then-act safe. For shared access use `ConcurrentHashMap`, `CopyOnWriteArrayList`, `ConcurrentSkipListMap`/`Set` (sorted).
 - Recommended: size `HashMap`/`ArrayList` when the count is known (`HashMap.newHashMap(n)` on Java 19+); `entrySet()` over `keySet()` + `get()`; `EnumMap`/`EnumSet` for enum keys.
 
 ### 1.5 Streams — Mandatory
@@ -62,7 +64,7 @@ if (Objects.equals(s1, s2)) { ... }   // or "CONST".equals(s) when one side is a
 - Recommended: a plain loop is fine when it's clearer; avoid long chains with side effects; don't reuse a stream.
 
 ### 1.6 Date/time: use java.time — Mandatory
-- Use `java.time` (`Instant`, `LocalDate`, `ZonedDateTime`, `DateTimeFormatter`). Store and transmit `Instant`/UTC; convert to a `ZoneId` only at the edges.
+- Use `java.time` (`Instant`, `LocalDate`, `ZonedDateTime`, `DateTimeFormatter`) — not Joda-Time, `java.util.Date` or `Calendar` in new code. Store and transmit `Instant`/UTC; convert to a `ZoneId` only at the edges.
 - Always specify the zone explicitly when converting between strings and dates: `LocalDateTime.parse(s, fmt).atZone(ZoneId.of("Europe/Paris"))`. The JVM default zone differs per server.
 - Never do manual offset math (`+ 8 * 3600 * 1000`); it breaks on DST. Use `ZoneId` rules.
 - Patterns: lowercase `yyyy` (`YYYY` is week-based year — 2010-12-26 formats as "2011"), uppercase `HH` for 24-hour (`hh` is 12-hour), lowercase `dd` (`DD` is day-of-year). Prefer ISO-8601 for APIs.
@@ -71,9 +73,9 @@ if (Objects.equals(s1, s2)) { ... }   // or "CONST".equals(s) when one side is a
 - `SimpleDateFormat`/`DecimalFormat` are not thread-safe; never store them in `static` fields. Use immutable `DateTimeFormatter` constants.
 
 ### 1.7 Spring proxy annotations — Mandatory
-`@Transactional`, `@Cacheable`, `@Async`, `@Retryable`, `@PreAuthorize` and custom aspects work through proxies:
+`@Transactional`, `@Cacheable`/`@CachePut`/`@CacheEvict`/`@Caching`, `@Async`, `@Retryable`, `@PreAuthorize`/`@PostAuthorize`/`@Secured` and custom aspects work through proxies:
 - Put them on `public` methods; on private methods they are silently ignored.
-- Self-invocation (`this.foo()` inside the same bean) bypasses the proxy, so the annotation does nothing. Move the annotated method to another bean.
+- Self-invocation (`this.foo()` inside the same bean) bypasses the proxy, so the annotation does nothing. Move the annotated method to another bean (a self-injected `@Lazy` reference also works, but splitting the bean is cleaner).
 - `@Transactional` rolls back only on unchecked exceptions by default; declare `rollbackFor = Exception.class` if checked exceptions should roll back.
 - More transaction rules (propagation, readOnly, rollback-only trap): `references/database-jpa.md` §3.
 
@@ -82,6 +84,7 @@ if (Objects.equals(s1, s2)) { ... }   // or "CONST".equals(s) when one side is a
 - Never swallow exceptions (empty `catch`). Handle, or rethrow wrapped **with the cause**: `throw new OrderException("Failed to load order " + id, e)`.
 - Log with the throwable as the last argument: `log.error("Failed to process order {}", orderId, e)`. Never `"..." + e` (loses the stack).
 - Don't catch `Exception`/`Throwable` broadly in business code; never catch `Error`.
+- Throw specific exceptions (domain or `IllegalArgumentException`/`IllegalStateException`), never raw `Exception`, `RuntimeException` or `Throwable` — callers can't handle what they can't distinguish.
 - Don't log-and-rethrow at every layer — log once, where it's handled.
 - Don't use exceptions for normal control flow (they're slow and obscure intent).
 - Recommended: a small domain exception hierarchy (unchecked) mapped to HTTP status in one `@RestControllerAdvice`; messages include the identifying context (IDs), never secrets.
@@ -93,9 +96,12 @@ if (Objects.equals(s1, s2)) { ... }   // or "CONST".equals(s) when one side is a
 - String concatenation inside loops → `StringBuilder` (or `String.join` / `Collectors.joining`).
 - `Random` shared across threads contends — use `ThreadLocalRandom.current()` (non-security) or `SecureRandom` (security).
 - Specify charsets explicitly (`StandardCharsets.UTF_8`) on byte↔String conversions (default changed in Java 18).
+- Migrate off `@Deprecated` APIs (JDK, Spring, libraries) in code you touch; deprecations are removal warnings that break the next upgrade. Compile with `-Xlint:deprecation`.
 
 ### 1.10 Classes, POJOs & serialization — Mandatory
 - Never define both `isXxx()` and `getXxx()` for one property, and don't name boolean fields `isXxx` (Jackson/MyBatis/Lombok disagree on the property name). Field `deleted`, accessor `isDeleted()`.
+- `isXxx()` returns primitive `boolean`. A `Boolean` return can be `null` and NPEs in `if (obj.isXxx())`; a nullable flag uses `getXxx()`.
+- Model domain concepts as named records/classes, not `Pair`/`Triple` (commons-lang3) or `Map.Entry` tuples — `getLeft()` hides meaning and leaves no place for behavior.
 - No same-name fields across an inheritance chain (frameworks bind only the child's copy → parent reads null).
 - `Serializable` classes declare `serialVersionUID`; nested serializable classes must be `static`.
 - Prefer immutability: `final` fields, records (Java 16+) for DTOs/value objects, defensive copies of mutable inputs.
@@ -103,8 +109,8 @@ if (Objects.equals(s1, s2)) { ... }   // or "CONST".equals(s) when one side is a
 
 ### 1.11 Naming & style — Recommended
 - Classes `UpperCamelCase` nouns; methods/variables `lowerCamelCase`, methods start with a verb; constants `UPPER_SNAKE_CASE` (`static final`, immutable); packages lowercase, no underscores.
-- Booleans read as questions: `active`, `hasItems`, `canRetry`. Collections plural.
-- Suffixes signal role: `*Service`, `*Repository`, `*Controller`, `*Config`, `*Exception`, `*Request`/`*Response` DTOs.
+- Booleans read as positive questions: `active`, `hasItems`, `canRetry`, `isEnabled()` — `!isNotEnabled()` is a double negation.
+- Suffixes signal role: `*Service`, `*Repository`, `*Controller`, `*Config`, `*Exception`, `*Request`/`*Response` DTOs. `Impl` belongs only on a class implementing an interface, never on an interface; with several implementations, name each by what differs (`JpaOrderRepository`, `StripePaymentGateway`).
 - No magic numbers/strings — named constants or enums.
 - Methods short and single-purpose; limit parameters (≥4 → parameter object/record).
 - Javadoc on public APIs describes params, return value, thrown exceptions; comments explain *why*, not *what*.
@@ -155,7 +161,7 @@ Use what the target version offers: records for data carriers; sealed interfaces
 
 ## 4. Resilience & Operations
 
-- **Bounded thread pools (Mandatory):** never `Executors.newCachedThreadPool()` / `newFixedThreadPool()` (unbounded threads or unbounded queue → OOM). Explicit core/max size, bounded queue, named threads, rejection policy, metrics.
+- **Bounded thread pools (Mandatory):** run work on managed executors, not raw `new Thread(...)` or `ThreadGroup`. Never `Executors.newCachedThreadPool()` / `newFixedThreadPool()` (unbounded threads or unbounded queue → OOM). Explicit core/max size, bounded queue, named threads, rejection policy, metrics.
   ```java
   @Bean
   ThreadPoolTaskExecutor orderExecutor() {
@@ -191,9 +197,11 @@ Use what the target version offers: records for data carriers; sealed interfaces
 - Circular dependencies are a design smell (disallowed by default since Boot 2.6) — extract a third bean rather than enabling `allow-circular-references`.
 - `ApplicationListener<ContextRefreshedEvent>` fires once per context (parent/child) — guard on the context, or use `ApplicationReadyEvent` / `ApplicationRunner` for "app started" logic.
 - `@PostConstruct` (`jakarta.annotation`) is fine; no heavy I/O there and don't rely on other beans' proxies being ready.
+- In-process events: `ApplicationEventPublisher` + `@EventListener` / `@TransactionalEventListener`, not Guava `EventBus` (Guava itself discourages it).
 
 ### 5.3 Layering — Recommended
 - Controllers thin (validate, map DTOs, delegate). Business logic and `@Transactional` in services. Repositories only do persistence.
+- **Dependencies point one way (Mandatory):** controller → service → repository. Services never depend on controllers; repositories never depend on services or controllers. Request-mapping methods (`@GetMapping`, `@PostMapping`, …) live only in `@RestController`/`@Controller` classes. Enforce with ArchUnit (§10).
 - Never expose JPA entities in API responses. API rules: `references/api-design.md`.
 - One `@RestControllerAdvice` producing `ProblemDetail`; never leak stack traces.
 - Structure by feature (`order/`, `payment/`) rather than by technical layer for larger apps; keep packages cohesive.
@@ -205,7 +213,7 @@ Use what the target version offers: records for data carriers; sealed interfaces
 
 ### 5.5 Caching — Recommended
 - `@Cacheable` keys must include every parameter that changes the result (tenant, user, locale). Explicit `key = "#tenantId + ':' + #id"` beats implicit keys when parameters are objects.
-- Set TTLs (`spring.cache.redis.time-to-live`) — no unbounded caches. Bound local caches (Caffeine `maximumSize`).
+- Set TTLs (`spring.cache.redis.time-to-live`) — no unbounded caches. Local caches: Caffeine (`CaffeineCacheManager`) with `maximumSize`, not Guava `CacheBuilder` (Google recommends Caffeine).
 - Evict/update on writes (`@CacheEvict`, `@CachePut`); accept and document the staleness window.
 - Don't cache `null`/errors unintentionally (`unless = "#result == null"`), and protect hot keys from stampedes (`sync = true`).
 - Cache immutable values; verify Redis serialization round-trips (`BigDecimal` scale, `java.time` types). Namespace keys per environment.
@@ -250,7 +258,7 @@ Full rules: `references/api-design.md`. Key points: correct status codes (never 
 
 ## 9. Logging — all Recommended
 
-- Log through SLF4J (Logback by default), not `System.out`/`System.err`.
+- Log through SLF4J (Logback by default), not `System.out`/`System.err` or `java.util.logging`.
 - Libraries depend on `slf4j-api` only; apps pick one binding. Check `mvn dependency:tree` for duplicate bindings and bridge loops (`log4j-slf4j2-impl` + `log4j-to-slf4j` = infinite loop).
 - `{}` placeholders, not concatenation. Request context in MDC, cleared in `finally`.
 - Guard expensive arguments: `if (log.isDebugEnabled())` or the fluent `log.atDebug().addArgument(() -> toJson(req)).log(...)`.
@@ -267,6 +275,7 @@ Full rules: `references/api-design.md`. Key points: correct status codes (never 
 - **Assert, never print (Mandatory):** AssertJ (`assertThat(result.isSuccess()).as("status check").isTrue()`) or JUnit 5 assertions with messages.
 - **Assert outcomes (Mandatory):** a call without assertions on result/side effects proves nothing. Verify interactions with Mockito only when the interaction *is* the behavior.
 - **Assert exception type AND message (Mandatory):** `assertThatThrownBy(() -> svc.pay(req)).isInstanceOf(InsufficientFundsException.class).hasMessageContaining("balance")`.
+- **Tests must actually run (Mandatory):** JUnit 5 `@Test`/`@ParameterizedTest` methods are non-`private` and non-`static`; JUnit silently skips those, so the "test" passes without executing.
 - **Independent, deterministic tests (Mandatory):** no ordering dependencies or shared mutable state; inject `Clock`; seed randomness; no `Thread.sleep` for async — use Awaitility.
 - **Right slice (Recommended):** plain JUnit + Mockito for logic; `@WebMvcTest`, `@DataJpaTest`, `@JsonTest`, `@RestClientTest` for slices; `@SpringBootTest` only for full integration. Mock beans with `@MockitoBean` (Boot 3.4+; `@MockBean` is deprecated).
 - **Real infrastructure (Recommended):** Testcontainers (`@ServiceConnection`) for PostgreSQL/MySQL/Kafka/Redis instead of H2 when SQL dialect or broker behavior matters. Reuse containers across tests to keep suites fast.
@@ -274,6 +283,23 @@ Full rules: `references/api-design.md`. Key points: correct status codes (never 
 - **Data-driven (Recommended):** `@ParameterizedTest` with `@CsvSource`/`@MethodSource`.
 - **Intent names (Recommended):** `pay_whenBalanceInsufficient_throws()` or `@DisplayName`.
 - **Cover the edges (Recommended):** null/empty inputs, boundaries, money rounding, time zones/DST, concurrency on critical paths, and security rules (unauthorized access returns 401/403).
+- **Architecture tests (Recommended):** encode the structural rules in this skill as ArchUnit tests so the build fails on drift: layer direction (§5.3), no entities returned from controllers, no field injection, proxy-annotation self-invocation (§1.7), private/static `@Test`, banned APIs (JUL, `System.out`, Joda-Time, legacy collections).
+  ```java
+  @AnalyzeClasses(packages = "com.example", importOptions = ImportOption.DoNotIncludeTests.class)
+  class ArchitectureTest {
+      @ArchTest static final ArchRule layers = layeredArchitecture().consideringAllDependencies()
+          .layer("Controller").definedBy("..controller..")
+          .layer("Service").definedBy("..service..")
+          .layer("Repository").definedBy("..repository..")
+          .whereLayer("Controller").mayNotBeAccessedByAnyLayer()
+          .whereLayer("Service").mayOnlyBeAccessedByLayers("Controller")
+          .whereLayer("Repository").mayOnlyBeAccessedByLayers("Service");
+      @ArchTest static final ArchRule noFieldInjection = GeneralCodingRules.NO_CLASSES_SHOULD_USE_FIELD_INJECTION;
+      @ArchTest static final ArchRule noJul = GeneralCodingRules.NO_CLASSES_SHOULD_USE_JAVA_UTIL_LOGGING;
+      @ArchTest static final ArchRule noStdStreams = GeneralCodingRules.NO_CLASSES_SHOULD_ACCESS_STANDARD_STREAMS;
+      @ArchTest static final ArchRule noGenericThrows = GeneralCodingRules.NO_CLASSES_SHOULD_THROW_GENERIC_EXCEPTIONS;
+  }
+  ```
 
 ---
 
@@ -283,6 +309,6 @@ Full rules: `references/api-design.md`. Key points: correct status codes (never 
 
 **Critical:** ignored `BigDecimal`/money operation result · `divide` without scale/rounding · shared mutable collections in `parallelStream` · ThreadLocal/MDC not cleared · unreleased locks/resources · non-atomic check-then-act on shared maps · unbounded thread pools · remote calls without timeouts · `CompletableFuture` on the common pool for I/O or with unhandled failures · `@Scheduled` single-run job with no distributed lock · `Collectors.toMap` on possibly-duplicate keys · modifying a collection during for-each.
 
-**Major:** message listener that swallows exceptions · programmatic transaction catch without `setRollbackOnly()` · messages/HTTP calls inside a DB transaction · `@Data`/`EAGER` on JPA entities · N+1 queries on hot paths · entities returned from controllers · field injection · `ddl-auto=update` in production · non-backward-compatible migration · enums in cross-service API contracts · 200 responses carrying errors · caching mutable objects or cache keys missing parameters · blocking calls inside WebFlux chains · MyBatis mapper missing DTD · manual timezone offset math.
+**Major:** message listener that swallows exceptions · programmatic transaction catch without `setRollbackOnly()` · messages/HTTP calls inside a DB transaction · `@Data`/`EAGER` on JPA entities · N+1 queries on hot paths · entities returned from controllers · field injection · `ddl-auto=update` in production · non-backward-compatible migration · enums in cross-service API contracts · 200 responses carrying errors · caching mutable objects or cache keys missing parameters · blocking calls inside WebFlux chains · MyBatis mapper missing DTD · manual timezone offset math · reverse-layer dependencies (service → controller, repository → service/controller) · private or static JUnit 5 `@Test` methods · `Optional`-returning method that returns `null` · proxy annotations other than `@Transactional` (`@Cacheable`, `@Async`, `@PreAuthorize`, …) on non-public or self-invoked methods.
 
-**Minor:** Recommended-level rules (naming, logging style, test structure, Javadoc, modern-Java idioms).
+**Minor:** Recommended-level rules (naming, logging style, test structure, Javadoc, modern-Java idioms) · throwing raw `Exception`/`RuntimeException` · legacy `Vector`/`Hashtable`/`StringBuffer`/`Stack` · Joda-Time/`java.util.Date` in new code · `java.util.logging` · deprecated API calls · `Pair`/`Triple` in domain code · Guava cache/`EventBus` · `Boolean`-returning `isXxx()` · interfaces named `*Impl` · `isNot…` methods.

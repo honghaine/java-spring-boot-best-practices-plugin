@@ -12,7 +12,7 @@ A Claude Code plugin with one skill: `java-spring-boot-best-practices`. It trigg
 | Money: `BigDecimal` rules, rounding, minor units, currencies | `SKILL.md` |
 | Concurrency: thread pools, `ThreadLocal`, `CompletableFuture`, atomicity, interrupts, virtual threads | `SKILL.md` |
 | Spring Boot: injection, config, scheduling, caching, observability, WebFlux, resilience | `SKILL.md` |
-| Logging & testing (JUnit 5, AssertJ, Testcontainers, `@MockitoBean`) | `SKILL.md` |
+| Logging & testing (JUnit 5, AssertJ, Testcontainers, `@MockitoBean`, ArchUnit architecture tests) | `SKILL.md` |
 | Security: injection, XXE, SSRF, Spring Security, JWT, IDOR, secrets, crypto, deserialization | `references/security.md` |
 | Database & JPA: migrations, transactions, entity design, N+1, locking, MyBatis | `references/database-jpa.md` |
 | REST API design: status codes, DTOs, validation, `ProblemDetail`, pagination, idempotency, versioning | `references/api-design.md` |
